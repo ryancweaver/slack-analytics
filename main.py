@@ -1,9 +1,9 @@
-import json
+import json as simplejson
 import os
 import re
 import csv
 
-filePath = "../slack-export/"
+filePath = "../slack_export/"
 usersFile = "users.json"
 
 #Create a user dictionary
@@ -13,7 +13,10 @@ uDict = {}
 reactions = {}
 
 #Load json data from users file
-userData = json.load(open(filePath + usersFile))
+userData = simplejson.load(open(filePath + usersFile))
+
+#@channel Mention Count
+atChannel = 0
 
 #Load all of the users into this user dictionary
 for user in userData:
@@ -21,8 +24,8 @@ for user in userData:
         uDict[user['id']] = {}
 
         #Get the user's real name
-        if user['real_name']:
-            uDict[user['id']]['realName'] = user['real_name']
+        if user['profile']['real_name']:
+            uDict[user['id']]['realName'] = user['profile']['real_name']
         else:
             uDict[user['id']]['realName'] = ''
 
@@ -33,7 +36,6 @@ for user in userData:
             uDict[user['id']]['displayName'] = ''
 
         #Initialize all of the user's statistics
-        uDict[user['id']]['fileShareCount'] = 0
         uDict[user['id']]['msgCount'] = 0
         uDict[user['id']]['msgWordCount'] = 0
         uDict[user['id']]['mentions'] = 0
@@ -46,27 +48,18 @@ for user in userData:
         uDict[user['id']]['rating'] = 0.0
 
 #Remove inactive users
-del uDict['U8TTQBS7J']
-del uDict['U8NV86D7C']
-del uDict['U98CRFKL5']
-del uDict['U8URRD4Q6']
-del uDict['U8TRB6BH9']
+# del uDict['U8TFKG11R']
 
 #Go through all of the files that were exported from slack
 for dirName, subdirList, fileList in os.walk(filePath):
     for fname in fileList:
         #Ignore the users, channels, and integration_logs files
-        if fname != 'users.json' and fname != 'channels.json' and fname != 'integration_logs.json':
-            fileData = json.load(open(dirName + '/' + fname))
+        if fname != 'users.json' and fname != 'channels.json' and fname != 'integration_logs.json' and fname != '.DS_Store':
+            fileData = simplejson.load(open(dirName + '/' + fname))
 
             for msg in fileData:
-                #Go through all of the subtype messages
-                if 'subtype' in msg:
-                    #Go through all of the subtype messages that are file shares
-                    if msg['subtype'] == 'file_share':
-                        uDict[msg['user']]['fileShareCount'] += 1
-                else:
-                    #The messages that don't have a subtype
+                #The messages that don't have a subtype (ignoring uploaded files)
+                if 'subtype' not in msg:
                     #Count the number of messages the user sent
                     uDict[msg['user']]['msgCount'] += 1
 
@@ -80,6 +73,10 @@ for dirName, subdirList, fileList in os.walk(filePath):
                         mention = mention.replace('@', '')
 
                         uDict[mention]['mentions'] += 1
+
+                    #Count the number of @channel mentions
+                    if "<!channel>" in msg['text']:
+                        atChannel += 1
 
                     #Count the number of messages a user has edited
                     if 'edited' in msg:
@@ -113,7 +110,6 @@ for u in uDict:
 
 #Rank users in all of their stats
 messageCount = list(reversed(sorted([(uDict[u]['msgCount'], u) for u in uDict])))
-fileShareCount = list(reversed(sorted([(uDict[u]['fileShareCount'], u) for u in uDict])))
 messageWordCount = list(reversed(sorted([(uDict[u]['msgWordCount'], u) for u in uDict])))
 mentionsCount = list(reversed(sorted([(uDict[u]['mentions'], u) for u in uDict])))
 reactionCount = list(reversed(sorted([(uDict[u]['reactionCount'], u) for u in uDict])))
@@ -122,15 +118,12 @@ wordsPerMessage = list(reversed(sorted([(uDict[u]['wordsPerMsg'], u) for u in uD
 reactedPerReactions = list(reversed(sorted([(uDict[u]['reactedPerReactions'], u) for u in uDict])))
 reactionsPerMsg = list(reversed(sorted([(uDict[u]['reactionsPerMsg'], u) for u in uDict])))
 
-#Find the position of where each user is ranked in each stat and caluclate the
+#Find the position of where each user is ranked in each stat and calculate the
 #overall rating for that user (add 1 to the index because the indecies start at 0)
 for u in uDict:
     for m in messageCount:
         if u in m:
             uDict[u]['rating'] += (messageCount.index(m) + 1)
-    for fs in fileShareCount:
-        if u in fs:
-            uDict[u]['rating'] += (fileShareCount.index(fs) + 1)
     for mw in messageWordCount:
         if u in mw:
             uDict[u]['rating'] += (messageWordCount.index(mw) + 1)
@@ -159,17 +152,17 @@ for u in uDict:
 #Create csv file for user stats
 with open('user_stats.csv', 'wb') as user_stats:
     writer = csv.writer(user_stats, delimiter=',')
+    
+    column_headers = ['User Real Name', 'User Display Name', 'Messages Sent', 'Total Words Sent', 
+    'Words Per Message', 'Mentions', 'Number of Messages Edited', 'Reactions Received',
+    'Number of Times User Reacted', 'Reactions Received Per Message', 'Reactions Given Per Reactions Received', 'Overall Rating']
 
     #Write users statistics to the csv file
-    writer.writerow(['User Real Name', 'User Display Name', 'Messages Sent',
-    'Files Shared', 'Total Words Sent', 'Words Per Message',
-    'Mentions', 'Number of Messages Edited', 'Reactions Received',
-    'Number of Times User Reacted', 'Reactions Received Per Message', 'Reactions Given Per Reactions Received', 'Overall Rating'])
+    writer.writerow(column_headers)
 
     #Initialize totals
     totalUsers = len(uDict)
     totalMsgCount = 0
-    totalFileShareCount = 0
     totalMsgWordCount = 0
     totalMentions = 0
     totalEditCount = 0
@@ -179,25 +172,27 @@ with open('user_stats.csv', 'wb') as user_stats:
     for u in uDict:
         #Keep a running total of most of the stats to show in the csv file
         totalMsgCount += uDict[u]['msgCount']
-        totalFileShareCount += uDict[u]['fileShareCount']
         totalMsgWordCount += uDict[u]['msgWordCount']
         totalMentions += uDict[u]['mentions']
         totalEditCount += uDict[u]['editCount']
         totalReactionCount +=  uDict[u]['reactionCount']
         totalReactedPerReactions += uDict[u]['reactedPerReactions']
 
-        writer.writerow([uDict[u]['realName'], uDict[u]['displayName'], uDict[u]['msgCount'],
-        uDict[u]['fileShareCount'], uDict[u]['msgWordCount'], uDict[u]['wordsPerMsg'],
-        uDict[u]['mentions'], uDict[u]['editCount'],  uDict[u]['reactionCount'],
+        writer.writerow([uDict[u]['realName'], uDict[u]['displayName'], uDict[u]['msgCount'], uDict[u]['msgWordCount'], 
+        uDict[u]['wordsPerMsg'], uDict[u]['mentions'], uDict[u]['editCount'],  uDict[u]['reactionCount'],
         uDict[u]['reactedCount'], uDict[u]['reactionsPerMsg'], uDict[u]['reactedPerReactions'], uDict[u]['rating']])
 
     #Write Total row
-    writer.writerow(['Total', '', totalMsgCount,
-    totalFileShareCount, totalMsgWordCount, float(totalMsgWordCount) / float(totalMsgCount),
+    totalRow = ['Total', '', totalMsgCount, totalMsgWordCount, float(totalMsgWordCount) / float(totalMsgCount),
     totalMentions, totalEditCount, totalReactionCount,
-    '', float(totalReactionCount) / float(totalMsgCount), float(totalReactedPerReactions) / float(totalUsers)])
+    '', float(totalReactionCount) / float(totalMsgCount), float(totalReactedPerReactions) / float(totalUsers)]
 
-#Create csv file for reacion statistics
+    writer.writerow(totalRow)
+    writer.writerow([])
+    writer.writerow([])
+    writer.writerow(['Channel Metions', atChannel])
+
+#Create csv file for reaction statistics
 with open('reaction_stats.csv', 'wb') as reaction_stats:
     writer = csv.writer(reaction_stats, delimiter=',')
 
@@ -215,4 +210,5 @@ with open('reaction_stats.csv', 'wb') as reaction_stats:
         #Keep a running total of most of the stats to show in the csv file
         totalCount += count
         writer.writerow([r, count])
+
     writer.writerow(['Total', totalCount])
